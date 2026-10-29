@@ -1,0 +1,172 @@
+[
+  {
+    "id": 1,
+    "title": "Pasta cremosa de limón",
+    "category": "Comida",
+    "time": "20 min",
+    "emoji": "🍝",
+    "color": "peach",
+    "description": "Fresca, sencilla y con un puntito cítrico.",
+    "ingredients": [
+      "Pasta",
+      "Limón",
+      "Nata o yogur",
+      "Parmesano"
+    ],
+    "steps": [
+      "Cuece la pasta y reserva un poco del agua.",
+      "Mezcla la ralladura y el zumo de limón con la nata.",
+      "Añade la pasta, un chorrito de agua y parmesano."
+    ],
+    "favorite": true,
+    "quick": true,
+    "shoppingList": [
+      "Pasta",
+      "Limón",
+      "Nata o yogur",
+      "Parmesano"
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Tostada de aguacate feliz",
+    "category": "Desayuno",
+    "time": "10 min",
+    "emoji": "🥑",
+    "color": "mint",
+    "description": "Un desayuno rico que alegra la mañana.",
+    "ingredients": [
+      "Pan de masa madre",
+      "Aguacate",
+      "Tomate",
+      "Limón"
+    ],
+    "steps": [
+      "Tuesta el pan.",
+      "Chafa el aguacate con unas gotas de limón.",
+      "Añade tomate y tus toppings favoritos."
+    ],
+    "favorite": false,
+    "quick": true,
+    "shoppingList": [
+      "Pan de masa madre",
+      "Aguacate",
+      "Tomate",
+      "Limón"
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Bizcocho de la abuela",
+    "category": "Postre",
+    "time": "55 min",
+    "emoji": "🍰",
+    "color": "lilac",
+    "description": "Esponjoso, casero y perfecto para compartir.",
+    "ingredients": [
+      "Harina",
+      "Huevos",
+      "Azúcar",
+      "Yogur",
+      "Aceite"
+    ],
+    "steps": [
+      "Bate los huevos con el azúcar.",
+      "Añade el yogur, el aceite y la harina.",
+      "Hornea a 180 °C hasta que esté dorado."
+    ],
+    "favorite": true,
+    "quick": false,
+    "shoppingList": [
+      "Harina",
+      "Huevos",
+      "Azúcar",
+      "Yogur",
+      "Aceite"
+    ]
+  },
+  {
+    "id": 4,
+    "title": "Tacos crujientes de verduras",
+    "category": "Cena",
+    "time": "25 min",
+    "emoji": "🌮",
+    "color": "butter",
+    "description": "Color, textura y una salsa para mojar.",
+    "ingredients": [
+      "Tortillas",
+      "Pimiento",
+      "Maíz",
+      "Alubias"
+    ],
+    "steps": [
+      "Saltea las verduras y las alubias.",
+      "Rellena las tortillas.",
+      "Dóralas en la sartén y sirve con salsa."
+    ],
+    "favorite": false,
+    "quick": true,
+    "shoppingList": [
+      "Tortillas",
+      "Pimiento",
+      "Maíz",
+      "Alubias"
+    ]
+  },
+  {
+    "id": 5,
+    "title": "Sopa suave de calabaza",
+    "category": "Cena",
+    "time": "35 min",
+    "emoji": "🍲",
+    "color": "blue",
+    "description": "Una cucharada calentita para los días tranquilos.",
+    "ingredients": [
+      "Calabaza",
+      "Cebolla",
+      "Caldo",
+      "Aceite de oliva"
+    ],
+    "steps": [
+      "Pocha la cebolla y añade la calabaza.",
+      "Cubre con caldo y cocina hasta que esté tierna.",
+      "Tritura y ajusta la textura a tu gusto."
+    ],
+    "favorite": false,
+    "quick": false,
+    "shoppingList": [
+      "Calabaza",
+      "Cebolla",
+      "Caldo",
+      "Aceite de oliva"
+    ]
+  },
+  {
+    "id": 6,
+    "title": "Fresas con crema de yogur",
+    "category": "Postre",
+    "time": "12 min",
+    "emoji": "🍓",
+    "color": "rose",
+    "description": "Un postre fresquito que casi se hace solo.",
+    "ingredients": [
+      "Fresas",
+      "Yogur griego",
+      "Miel",
+      "Pistachos"
+    ],
+    "steps": [
+      "Corta las fresas.",
+      "Mezcla el yogur con un poco de miel.",
+      "Sirve con pistachos picados."
+    ],
+    "favorite": false,
+    "quick": true,
+    "shoppingList": [
+      "Fresas",
+      "Yogur griego",
+      "Miel",
+      "Pistachos"
+    ]
+  }
+]
