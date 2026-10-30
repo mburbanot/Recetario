@@ -226,6 +226,21 @@
       font-size: 17px;
     }
     .favorite[aria-pressed="true"] { color: #ef6c67; }
+    .delete-recipe {
+      position: absolute;
+      z-index: 1;
+      top: 12px;
+      right: 54px;
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 50%;
+      background: white;
+      color: #8a6259;
+      font-size: 17px;
+    }
     .recipe-info { padding: 15px 17px 17px; }
     .recipe-meta { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
     .tag { padding: 5px 9px; border-radius: 999px; background: #eef4e5; color: var(--green-dark); font-size: 10px; font-weight: 900; }
@@ -383,6 +398,7 @@
       .recipe-image { height: 100%; min-height: 155px; font-size: 54px; }
       .recipe-image::after { inset: 7px; }
       .favorite { top: 8px; right: 8px; width: 29px; height: 29px; font-size: 14px; }
+      .delete-recipe { top: 8px; right: 43px; width: 29px; height: 29px; font-size: 14px; }
       .recipe-info { display: flex; flex-direction: column; justify-content: center; padding: 12px; }
       .recipe-info h3 { margin-top: 8px; font-size: 16px; }
       .recipe-info p { font-size: 11px; }
@@ -557,6 +573,7 @@
 
         <div id="draft-form" hidden>
           <div class="provisional">Revisa los apartados y corrige lo que necesites antes de guardar.</div>
+          <p class="hint" id="draft-format-preview" aria-live="polite" hidden></p>
           <div class="form-grid">
             <div class="field wide"><label for="draft-title">Nombre de la receta</label><input id="draft-title" required placeholder="Ej. Tortitas de domingo"></div>
             <div class="field wide">
@@ -571,6 +588,7 @@
               <select id="draft-category"><option>Comida</option><option>Desayuno</option><option>Cena</option><option>Postre</option></select>
             </div>
             <div class="field"><label for="draft-time">Tiempo aproximado</label><input id="draft-time" placeholder="30 min"></div>
+            <div class="field wide"><label for="draft-description">Descripción</label><input id="draft-description" maxlength="60" placeholder="Una frase breve y cercana"></div>
             <div class="field wide"><label for="draft-ingredients">Ingredientes</label><textarea id="draft-ingredients" placeholder="Un ingrediente por línea"></textarea></div>
             <div class="field wide"><label for="draft-steps">Elaboración</label><textarea class="tall" id="draft-steps" placeholder="Describe los pasos en orden"></textarea></div>
             <div class="field wide"><label for="draft-shopping-list">Lista de la compra</label><textarea id="draft-shopping-list" placeholder="Un producto por línea"></textarea></div>
@@ -590,6 +608,7 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="formateador.js"></script>
   <script>
     let recipes = [
       { id: 1, title: "Pasta cremosa de limón", category: "Comida", time: "20 min", emoji: "🍝", color: "peach", description: "Fresca, sencilla y con un puntito cítrico.", ingredients: ["Pasta", "Limón", "Nata o yogur", "Parmesano"], steps: ["Cuece la pasta y reserva un poco del agua.", "Mezcla la ralladura y el zumo de limón con la nata.", "Añade la pasta, un chorrito de agua y parmesano."] , favorite: true, quick: true },
@@ -613,6 +632,7 @@
     let activeRecognition = null;
     let draftSourceUrl = "";
     let draftPhotoData = "";
+    let draftRawText = "";
     const storageKey = "la-cucharita-recipes-v1";
     const weeklyMenuStorageKey = "la-cucharita-weekly-menu-v1";
     const menuDays = [
@@ -656,6 +676,7 @@
             </div>
           </button>
           <button class="favorite" type="button" data-favorite="${recipe.id}" aria-label="${recipe.favorite ? "Quitar de" : "Añadir a"} favoritas" aria-pressed="${recipe.favorite}">♡</button>
+          <button class="delete-recipe" type="button" data-delete-recipe="${recipe.id}" aria-label="Eliminar receta: ${escapeHtml(recipe.title)}">×</button>
         </article>`).join("");
     }
 
@@ -786,6 +807,35 @@
         console.error("No se pudo guardar el menú semanal.", error);
         showToast("No se pudo guardar el menú semanal en este navegador.");
         return false;
+      }
+    }
+
+    function deleteRecipe(id) {
+      const recipe = recipes.find(item => item.id === id);
+      if (!recipe || !window.confirm(`¿Quieres eliminar «${recipe.title}»? Esta acción no se puede deshacer.`)) return;
+
+      const previousRecipes = recipes;
+      const previousMenus = JSON.stringify(weeklyMenus);
+      recipes = recipes.filter(item => item.id !== id);
+      if (!saveRecipes()) {
+        recipes = previousRecipes;
+        renderRecipes();
+        return;
+      }
+
+      Object.values(weeklyMenus).forEach(plan => {
+        menuDays.forEach(day => {
+          plan[day.id] = (plan[day.id] || []).filter(recipeId => recipeId !== id);
+        });
+      });
+      const menusSaved = saveWeeklyMenus();
+      renderRecipes();
+      renderWeeklyMenu();
+      if (menusSaved) showToast(`Se eliminó «${recipe.title}».`);
+      else {
+        weeklyMenus = JSON.parse(previousMenus);
+        renderWeeklyMenu();
+        showToast(`Se eliminó «${recipe.title}», pero no se pudo actualizar el menú semanal guardado.`);
       }
     }
 
@@ -948,64 +998,33 @@
       preview.hidden = false;
     }
 
-    function parseRecipeText(raw) {
-      const preparedText = raw
-        .replace(/([.!?])\s+(?=(?:ingredientes?|elaboraci[oó]n|preparaci[oó]n|lista de la compra|lista de compras)\b)/gi, "$1\n")
-        .replace(/(,|\s)(?=(?:ingredientes?|elaboraci[oó]n|preparaci[oó]n|lista de la compra|lista de compras)\s*:)/gi, "\n");
-      const sections = { ingredients: [], steps: [], shoppingList: [] };
-      const sectionPattern = /^\s*(ingredientes?|elaboraci[oó]n|preparaci[oó]n|lista de la compra|lista de compras)\s*:?\s*(.*)$/i;
-      const lines = preparedText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-      let activeSection = "";
-      const unsectioned = [];
+    function getDraftRecipeInput() {
+      const value = id => document.getElementById(id).value;
+      const lines = id => value(id).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      return {
+        texto: draftRawText,
+        title: value("draft-title"),
+        category: value("draft-category"),
+        time: value("draft-time"),
+        description: value("draft-description"),
+        ingredients: lines("draft-ingredients"),
+        steps: lines("draft-steps"),
+        shoppingList: lines("draft-shopping-list")
+      };
+    }
 
-      for (const line of lines) {
-        const match = line.match(sectionPattern);
-        if (match) {
-          const label = match[1].toLocaleLowerCase("es");
-          activeSection = label.startsWith("ingrediente")
-            ? "ingredients"
-            : label.startsWith("elaboraci") || label.startsWith("preparaci")
-              ? "steps"
-              : "shoppingList";
-          if (match[2]) sections[activeSection].push(match[2]);
-          continue;
-        }
-        if (activeSection) sections[activeSection].push(line);
-        else unsectioned.push(line);
-      }
+    function formatCurrentDraft() {
+      return formatearReceta(getDraftRecipeInput(), { totalRecetas: recipes.length }).receta;
+    }
 
-      const hasSectionHeadings = lines.some(line => sectionPattern.test(line));
-      let statements = unsectioned.flatMap(line => line.split(/(?<=[.!?])\s+/)).filter(Boolean);
-      let title = (hasSectionHeadings ? unsectioned.shift() : statements.shift()) || "";
-      title = title.replace(/^(?:receta(?:\s+de)?|hoy\s+(?:vamos\s+a\s+)?(?:preparar|hacer))\s*:?\s*/i, "").replace(/^#\s*/, "").replace(/[.!?]+$/, "").trim();
-
-      if (!sections.ingredients.length) {
-        const transcript = (hasSectionHeadings ? unsectioned : statements).join(" ");
-        const ingredientCue = /\b(?:los ingredientes(?: son)?|ingredientes|necesitamos|vamos a necesitar|vas a necesitar)\s*[:,]?\s*/i;
-        const cueMatch = transcript.match(ingredientCue);
-        if (cueMatch) {
-          const ingredientStart = cueMatch.index + cueMatch[0].length;
-          const stepsStart = transcript.slice(ingredientStart).search(/\b(?:para empezar|empezamos|primero|después|a continuación|luego|elaboraci[oó]n|preparaci[oó]n)\b/i);
-          const ingredientText = stepsStart < 0
-            ? transcript.slice(ingredientStart)
-            : transcript.slice(ingredientStart, ingredientStart + stepsStart);
-          sections.ingredients.push(ingredientText);
-        }
-      }
-
-      const toItems = values => values.join("\n")
-        .split(/\r?\n|[;,]|\s+y\s+(?=(?:\d|un\b|una\b|unos\b|unas\b|medio\b|media\b|una pizca\b|un puñado\b))/i)
-        .map(item => item.replace(/^[\s•*-]+/, "").trim().replace(/[.!?]+$/, ""))
-        .filter(Boolean);
-      const ingredients = toItems(sections.ingredients);
-      const steps = sections.steps.length
-        ? sections.steps.join("\n").split(/(?<=[.!?])\s+/).map(step => step.trim()).filter(Boolean)
-        : statements.filter(statement => !/\b(?:los ingredientes(?: son)?|ingredientes|necesitamos|vamos a necesitar|vas a necesitar)\b/i.test(statement));
-      const shoppingList = sections.shoppingList.length
-        ? toItems(sections.shoppingList)
-        : ingredients.slice();
-
-      return { title, ingredients, steps, shoppingList };
+    function applyFormattedRecipeToDraft(recipe) {
+      document.getElementById("draft-title").value = recipe.title;
+      document.getElementById("draft-category").value = recipe.category;
+      document.getElementById("draft-time").value = recipe.time;
+      document.getElementById("draft-description").value = recipe.description;
+      document.getElementById("draft-ingredients").value = recipe.ingredients.join("\n");
+      document.getElementById("draft-steps").value = recipe.steps.join("\n");
+      document.getElementById("draft-shopping-list").value = recipe.shoppingList.join("\n");
     }
 
     function setMode(mode) {
@@ -1026,6 +1045,14 @@
       document.getElementById("panel-weekly-menu").hidden = tabId !== "tab-weekly-menu";
     }
 
+    function updateDraftFormatPreview() {
+      const recipe = formatCurrentDraft();
+      const colorLabels = { peach: "melocotón", mint: "menta", lilac: "lila", butter: "mantequilla", blue: "azul", rose: "rosa" };
+      const preview = document.getElementById("draft-format-preview");
+      preview.textContent = `Formato aplicado: ${recipe.emoji} · color ${colorLabels[recipe.color]} · ${recipe.quick ? "receta rápida" : "no marcada como rápida"}.`;
+      preview.hidden = false;
+    }
+
     function resetAddForm() {
       document.getElementById("draft-form").hidden = true;
       document.getElementById("prepare-button").hidden = false;
@@ -1036,10 +1063,12 @@
       document.getElementById("link-notes").value = "";
       document.getElementById("draft-title").value = "";
       document.getElementById("draft-photo").value = "";
+      document.getElementById("draft-format-preview").hidden = true;
       updateDraftPhotoPreview("");
       draftPhotoData = "";
       document.getElementById("draft-category").value = "Comida";
       document.getElementById("draft-time").value = "";
+      document.getElementById("draft-description").value = "";
       document.getElementById("draft-ingredients").value = "";
       document.getElementById("draft-steps").value = "";
       document.getElementById("draft-shopping-list").value = "";
@@ -1049,6 +1078,7 @@
         activeRecognition = null;
       }
       draftSourceUrl = "";
+      draftRawText = "";
       document.getElementById("start-recording").textContent = "● Empezar a dictar";
       setMode("write");
     }
@@ -1082,7 +1112,7 @@
           if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("unsupported protocol");
           draftSourceUrl = parsed.href;
           const slug = parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname.replace(/^www\./, "");
-          document.getElementById("draft-title").value = decodeURIComponent(slug).replace(/[-_]/g, " ").replace(/\b\w/g, char => char.toLocaleUpperCase("es"));
+          document.getElementById("draft-title").value = decodeURIComponent(slug);
         } catch {
           document.getElementById("source-url").focus();
           showToast("Comprueba que el enlace empiece por https:// o http://.");
@@ -1090,15 +1120,11 @@
         }
       }
 
-      if (raw) {
-        const parsedRecipe = parseRecipeText(raw);
-        if (parsedRecipe.title && !document.getElementById("draft-title").value) {
-          document.getElementById("draft-title").value = parsedRecipe.title.slice(0, 70);
-        }
-        document.getElementById("draft-ingredients").value = parsedRecipe.ingredients.join("\n");
-        document.getElementById("draft-steps").value = parsedRecipe.steps.join("\n");
-        document.getElementById("draft-shopping-list").value = parsedRecipe.shoppingList.join("\n");
-      }
+      draftRawText = raw;
+      const recipe = formatCurrentDraft();
+      draftRawText = "";
+      applyFormattedRecipeToDraft(recipe);
+      updateDraftFormatPreview(recipe);
       document.getElementById("draft-form").hidden = false;
       document.getElementById("prepare-button").hidden = true;
       document.getElementById("save-button").hidden = false;
@@ -1106,176 +1132,28 @@
     }
     
 
-    function formatRecipeTitle(value) {
-      const title = value.trim().replace(/\s+/g, " ").replace(/[.!?]+$/, "").slice(0, 70).trim();
-      const characters = Array.from(title.toLocaleLowerCase("es"));
-      if (characters.length) characters[0] = characters[0].toLocaleUpperCase("es");
-      const properNames = new Map([
-        ["santiago", "Santiago"], ["césar", "César"], ["alfredo", "Alfredo"],
-        ["parís", "París"], ["roma", "Roma"], ["nápoles", "Nápoles"],
-        ["dijon", "Dijon"], ["provenza", "Provenza"], ["toscana", "Toscana"],
-        ["méxico", "México"]
-      ]);
-      return characters.join("").replace(/\b(santiago|césar|alfredo|parís|roma|nápoles|dijon|provenza|toscana|méxico)\b/gi,
-        name => properNames.get(name.toLocaleLowerCase("es")));
-    }
-
-    function formatRecipeTime(value) {
-      const time = value.trim().toLocaleLowerCase("es");
-      const hourMatch = time.match(/^(\d+)\s*(?:h|hrs?|horas?)(?:\s*(\d+)\s*(?:min(?:utos?)?))?$/);
-      const minuteMatch = time.match(/^(\d+)\s*(?:min(?:utos?)?)?$/);
-      const hours = hourMatch ? Number(hourMatch[1]) : 0;
-      const minutes = hourMatch
-        ? Number(hourMatch[2] || 0)
-        : minuteMatch ? Number(minuteMatch[1]) : NaN;
-      const totalMinutes = hours * 60 + minutes;
-      if (!Number.isSafeInteger(totalMinutes) || totalMinutes < 0) return { time: "A tu ritmo", minutes: null };
-      return {
-        time: totalMinutes < 60
-          ? `${totalMinutes} min`
-          : `${Math.floor(totalMinutes / 60)} h ${totalMinutes % 60} min`,
-        minutes: totalMinutes
-      };
-    }
-
-    const recipeUnits = "(?:kilogramos?|kilos?|kg|gramos?|grs?|g|miligramos?|mg|mililitros?|ml|centilitros?|cl|litros?|l|cucharadas?(?:\\s+soperas?)?|cucharaditas?(?:\\s+de\\s+caf[eé])?|tazas?|vasos?|dientes?|pizcas?|puñados?|ramas?|rebanadas?)";
-
-    function formatIngredient(value) {
-      const text = value.trim().replace(/\s+/g, " ").replace(/[.!?]+$/, "");
-      const amountMatch = text.match(new RegExp(`^((?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?))\\s*(${recipeUnits})(?=\\s|de\\b)\\s*(?:de\\s+)?(.+)$`, "i"));
-      const countedIngredient = !amountMatch && text.match(/^((?:\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?)\s+)(.+)$/);
-      const ingredient = (amountMatch ? amountMatch[3] : countedIngredient ? countedIngredient[2] : text).toLocaleLowerCase("es");
-      const characters = Array.from(ingredient);
-      if (characters.length) characters[0] = characters[0].toLocaleUpperCase("es");
-      const formattedIngredient = characters.join("");
-      if (countedIngredient) return `${countedIngredient[1]}${formattedIngredient}`;
-      if (!amountMatch) return formattedIngredient;
-      return `${amountMatch[1]} ${amountMatch[2].toLocaleLowerCase("es")} de ${formattedIngredient.toLocaleLowerCase("es")}`;
-    }
-
-    function formatShoppingList(items, title) {
-      const titleHighlightsBasic = /\b(?:agua|sal|aceite)\b/i.test(title);
-      const products = items.map(item => item.trim()
-        .replace(/^(?:un|una|unos|unas|medio|media)\s+/i, "")
-        .replace(new RegExp(`^(?:${recipeUnits})\\s+(?:de\\s+)?`, "i"), "")
-        .replace(new RegExp(`^(?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?)\\s*(?:${recipeUnits}(?=\\s|de\\b)\\s*)?(?:de\\s+)?`, "i"), "")
-        .replace(/\s+/g, " ")
-        .replace(/[.!?]+$/, ""));
-      const uniqueProducts = new Map();
-      products.forEach(product => {
-        const normalized = formatIngredient(product);
-        if (!normalized || (!titleHighlightsBasic && /^(?:agua|sal|aceite)(?:\b|$)/i.test(normalized))) return;
-        const key = normalized.toLocaleLowerCase("es");
-        if (!uniqueProducts.has(key)) uniqueProducts.set(key, normalized);
-      });
-      return [...uniqueProducts.values()];
-    }
-
-    function formatRecipeSteps(lines) {
-      const imperativeForms = {
-        añade: "Añade", añadir: "Añade", añada: "Añade", agrega: "Agrega", agregar: "Agrega", agregue: "Agrega",
-        incorpora: "Incorpora", incorporar: "Incorpora", mezclar: "Mezcla", mezcla: "Mezcla", mezcle: "Mezcla",
-        cortar: "Corta", corta: "Corta", corte: "Corta", picar: "Pica", pica: "Pica", pique: "Pica",
-        batir: "Bate", bate: "Bate", bata: "Bate", calentar: "Calienta", calienta: "Calienta",
-        cocinar: "Cocina", cocina: "Cocina", cocine: "Cocina", hornear: "Hornea", hornea: "Hornea",
-        servir: "Sirve", sirve: "Sirve", sirva: "Sirve", triturar: "Tritura", tritura: "Tritura",
-        rellenar: "Rellena", rellena: "Rellena", dorar: "Dora", dora: "Dora", saltear: "Saltea",
-        saltea: "Saltea", cubrir: "Cubre", cubre: "Cubre", cocer: "Cuece", cuece: "Cuece",
-        tostar: "Tuesta", tuesta: "Tuesta", chafar: "Chafa", chafa: "Chafa", pelar: "Pela",
-        pela: "Pela", escurrir: "Escurre", escurre: "Escurre", reservar: "Reserva", reserva: "Reserva",
-        lavar: "Lava", lava: "Lava", verter: "Vierte", vierte: "Vierte", dejar: "Deja", deja: "Deja",
-        remover: "Remueve", remueve: "Remueve", retirar: "Retira", retira: "Retira", colocar: "Coloca",
-        coloca: "Coloca", llevar: "Lleva", lleva: "Lleva", precalentar: "Precalienta", precalienta: "Precalienta",
-        exprimir: "Exprime", exprime: "Exprime", montar: "Monta", monta: "Monta", amasar: "Amasa", amasa: "Amasa",
-        freír: "Fríe", fríe: "Fríe", echar: "Echa", echa: "Echa", sazonar: "Sazona", sazona: "Sazona",
-        probar: "Prueba", prueba: "Prueba", apagar: "Apaga", apaga: "Apaga", fundir: "Funde", funde: "Funde",
-        disolver: "Disuelve", disuelve: "Disuelve", tapar: "Tapa", tapa: "Tapa", enfriar: "Enfría",
-        enfría: "Enfría", esperar: "Espera", espera: "Espera", introducir: "Introduce", introduce: "Introduce",
-        sacar: "Saca", saca: "Saca", decorar: "Decora", decora: "Decora", rallar: "Ralla", ralla: "Ralla",
-        mezclamos: "Mezcla", mezclan: "Mezcla", añadimos: "Añade", añaden: "Añade",
-        agregamos: "Agrega", agregan: "Agrega", incorporamos: "Incorpora", incorporan: "Incorpora",
-        cortamos: "Corta", picamos: "Pica", batimos: "Bate", cocinamos: "Cocina", horneamos: "Hornea",
-        servimos: "Sirve", trituramos: "Tritura", rellenamos: "Rellena", doramos: "Dora", salteamos: "Saltea",
-        cubrimos: "Cubre", cocemos: "Cuece", tostamos: "Tuesta", pelamos: "Pela", escurrimos: "Escurre",
-        reservamos: "Reserva", lavamos: "Lava", vertemos: "Vierte", dejamos: "Deja", removemos: "Remueve"
-      };
-      const verbPattern = Object.keys(imperativeForms).sort((a, b) => b.length - a.length).join("|");
-      const splitActions = new RegExp(`;\\s*|\\s+y\\s+(?=(?:se\\s+)?(?:${verbPattern})\\b)`, "i");
-
-      return lines.flatMap(line => line.split(/(?<=[.!?])\s+|;\s*/))
-        .flatMap(sentence => sentence.split(splitActions))
-        .map(step => {
-          let text = step.trim().replace(/[.!?]+$/, "");
-          const opening = text.match(/^(?:(?:primero|después|a continuación|luego|por último),?\s+)/i);
-          const prefix = opening ? opening[0] : "";
-          const action = text.slice(prefix.length).replace(/^se\s+/i, "");
-          const actionMatch = action.match(/^([\wáéíóúüñ]+)(.*)$/i);
-          if (actionMatch && imperativeForms[actionMatch[1].toLocaleLowerCase("es")]) {
-            text = `${prefix}${imperativeForms[actionMatch[1].toLocaleLowerCase("es")]}${actionMatch[2]}`;
-          } else {
-            text = `${prefix}${action}`;
-          }
-          const characters = Array.from(text);
-          if (characters.length) characters[0] = characters[0].toLocaleUpperCase("es");
-          return `${characters.join("")}.`;
-        })
-        .filter(step => step !== ".");
-    }
-
-    function getRecipeEmoji(title, ingredients) {
-      const text = `${title} ${ingredients.join(" ")}`.toLocaleLowerCase("es");
-      const emojiByFood = [
-        [/\b(?:pasta|espagueti|macarr[oó]n)\b/, "🍝"],
-        [/\b(?:arroz|paella)\b/, "🍚"],
-        [/\b(?:sopa|crema|caldo)\b/, "🍲"],
-        [/\b(?:aguacate)\b/, "🥑"],
-        [/\b(?:tostada|pan|bocadillo)\b/, "🍞"],
-        [/\b(?:bizcocho|tarta|pastel|galleta)\b/, "🍰"],
-        [/\b(?:taco|tacos)\b/, "🌮"],
-        [/\b(?:ensalada)\b/, "🥗"],
-        [/\b(?:pollo)\b/, "🍗"],
-        [/\b(?:pescado|salm[oó]n|at[uú]n)\b/, "🐟"],
-        [/\b(?:pizza)\b/, "🍕"],
-        [/\b(?:huevo|tortilla)\b/, "🍳"],
-        [/\b(?:fresa|fresas)\b/, "🍓"],
-        [/\b(?:caf[eé])\b/, "☕"]
-      ];
-      return emojiByFood.find(([pattern]) => pattern.test(text))?.[1] || "🍽️";
-    }
-
     function saveDraft() {
-      const title = formatRecipeTitle(document.getElementById("draft-title").value);
-      if (!title) {
+      const recipe = formatCurrentDraft();
+      if (!recipe.title) {
         document.getElementById("draft-title").focus();
         showToast("Ponle un nombre para poder guardarla.");
         return;
       }
-      const ingredients = document.getElementById("draft-ingredients").value.split(/\r?\n/)
-        .map(formatIngredient).filter(Boolean);
-      const steps = formatRecipeSteps(document.getElementById("draft-steps").value.split(/\r?\n/).map(line => line.trim()).filter(Boolean));
-      const enteredShoppingList = document.getElementById("draft-shopping-list").value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-      const shoppingList = formatShoppingList(enteredShoppingList.length ? enteredShoppingList : ingredients, title);
-      const parsedTime = formatRecipeTime(document.getElementById("draft-time").value);
-      const categories = ["Desayuno", "Comida", "Cena", "Postre"];
-      const selectedCategory = document.getElementById("draft-category").value;
-      const colors = ["peach", "mint", "lilac", "butter", "blue", "rose"];
-      let color = colors[nextId % colors.length];
-      if (recipes[0]?.color === color) color = colors[(colors.indexOf(color) + 1) % colors.length];
       recipes.unshift({
         id: nextId++,
-        title,
-        category: categories.includes(selectedCategory) ? selectedCategory : "Comida",
-        time: parsedTime.time,
-        emoji: getRecipeEmoji(title, ingredients),
-        color,
-        description: "Una receta para disfrutar en cualquier momento.",
-        ingredients,
-        steps,
-        shoppingList,
+        title: recipe.title,
+        category: recipe.category,
+        time: recipe.time,
+        emoji: recipe.emoji,
+        color: recipe.color,
+        description: recipe.description,
+        ingredients: recipe.ingredients,
+        steps: recipe.steps,
+        shoppingList: recipe.shoppingList,
         sourceUrl: draftSourceUrl,
         ...(draftPhotoData ? { image: draftPhotoData } : {}),
         favorite: false,
-        quick: parsedTime.minutes !== null && parsedTime.minutes <= 30
+        quick: recipe.quick
       });
       const saved = saveRecipes();
       categoryFilter.value = "Todas";
@@ -1325,6 +1203,9 @@
     modeTabs.forEach(tab => tab.addEventListener("click", () => setMode(tab.dataset.mode)));
     document.getElementById("prepare-button").addEventListener("click", prepareDraft);
     document.getElementById("save-button").addEventListener("click", saveDraft);
+    ["draft-title", "draft-time", "draft-ingredients"].forEach(id => {
+      document.getElementById(id).addEventListener("input", updateDraftFormatPreview);
+    });
     document.getElementById("export-recipes").addEventListener("click", exportRecipes);
     const importFileInput = document.getElementById("import-recipes-file");
     document.getElementById("import-recipes").addEventListener("click", () => importFileInput.click());
@@ -1388,6 +1269,11 @@
       renderRecipes();
     });
     document.getElementById("recipe-grid").addEventListener("click", event => {
+      const deleteButton = event.target.closest("[data-delete-recipe]");
+      if (deleteButton) {
+        deleteRecipe(Number(deleteButton.dataset.deleteRecipe));
+        return;
+      }
       const favoriteButton = event.target.closest("[data-favorite]");
       if (favoriteButton) {
         const recipe = recipes.find(item => item.id === Number(favoriteButton.dataset.favorite));
