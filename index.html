@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#fffdf8">
   <title>La cucharita — Mi recetario</title>
   <style>
+    [hidden] { display: none !important; }
     :root {
       color-scheme: light;
       --ink: #26352d;
@@ -159,7 +160,8 @@
       background: white;
       color: var(--ink);
     }
-    .recipe-actions { display: flex; justify-content: flex-end; gap: 9px; margin: -5px 0 17px; }
+    .recipe-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 9px; margin: -5px 0 17px; }
+    .admin-status { margin-right: auto; color: var(--muted); font-size: 12px; }
     .menu-controls { display: flex; align-items: end; gap: 10px; margin-bottom: 18px; }
     .menu-controls .field { width: min(230px, 100%); margin: 0; }
     .week-label { margin-left: auto; padding-bottom: 12px; color: var(--muted); font-size: 12px; font-weight: 700; }
@@ -432,7 +434,7 @@
           <div class="eyebrow">Tu recetario personal</div>
           <h1 id="welcome-title">La cocina empieza con <em>una idea.</em></h1>
           <p>Guarda ese plato que te encanta, esa receta que te han contado o ese enlace que no quieres perder.</p>
-          <button class="primary-button" type="button" data-open-add><span aria-hidden="true">＋</span> Añadir una receta</button>
+          <button class="primary-button" type="button" data-open-add hidden><span aria-hidden="true">＋</span> Añadir una receta</button>
         </div>
         <div class="hero-art" aria-hidden="true">
           <span class="sun"></span>
@@ -467,8 +469,11 @@
           </label>
         </div>
         <div class="recipe-actions" aria-label="Importar o exportar recetas">
+          <span class="admin-status" id="admin-status" role="status" aria-live="polite"></span>
+          <button class="secondary-button" id="admin-login" type="button" hidden>Iniciar sesión</button>
+          <button class="secondary-button" id="admin-logout" type="button" hidden>Cerrar sesión</button>
           <button class="secondary-button" id="export-recipes" type="button">↓ Exportar JSON</button>
-          <button class="secondary-button" id="import-recipes" type="button">↑ Importar JSON</button>
+          <button class="secondary-button" id="import-recipes" type="button" hidden>↑ Importar JSON</button>
           <input id="import-recipes-file" type="file" accept=".json,application/json" hidden>
         </div>
         <div class="chips" id="quick-filters" aria-label="Filtros rápidos">
@@ -582,7 +587,7 @@
                 <input id="draft-photo" type="file" accept="image/*">
                 <div class="photo-preview" id="draft-photo-preview" hidden></div>
               </div>
-              <p class="hint">Elige una imagen de tu dispositivo (máximo 8 MB). Se guardará en este navegador.</p>
+              <p class="hint">Elige una imagen de tu dispositivo (máximo 8 MB). Se guardará con la receta compartida.</p>
             </div>
             <div class="field"><label for="draft-category">Categoría</label>
               <select id="draft-category"><option>Comida</option><option>Desayuno</option><option>Cena</option><option>Postre</option></select>
@@ -597,7 +602,7 @@
         <div class="dialog-actions">
           <button class="cancel-button" type="button" data-close>Ahora no</button>
           <button class="primary-button" type="button" id="prepare-button">Darle forma <span aria-hidden="true">→</span></button>
-          <button class="primary-button" type="button" id="save-button" hidden>Guardar en este boceto <span aria-hidden="true">♡</span></button>
+          <button class="primary-button" type="button" id="save-button" hidden>Publicar receta <span aria-hidden="true">♡</span></button>
         </div>
       </div>
     </div>
@@ -609,6 +614,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="formateador.js"></script>
+  <script src="api-config.js"></script>
   <script>
     let recipes = [
       { id: 1, title: "Pasta cremosa de limón", category: "Comida", time: "20 min", emoji: "🍝", color: "peach", description: "Fresca, sencilla y con un puntito cítrico.", ingredients: ["Pasta", "Limón", "Nata o yogur", "Parmesano"], steps: ["Cuece la pasta y reserva un poco del agua.", "Mezcla la ralladura y el zumo de limón con la nata.", "Añade la pasta, un chorrito de agua y parmesano."] , favorite: true, quick: true },
@@ -627,6 +633,10 @@
     const modeTabs = [...document.querySelectorAll(".mode-tab")];
     let activeMode = "write";
     let quickFilter = "Todas";
+    let adminAuthenticated = false;
+    let publicCatalogLoaded = false;
+    let adminSessionToken = "";
+    let sharedCatalogRecipes = [];
     let nextId = 7;
     let toastTimer;
     let activeRecognition = null;
@@ -635,6 +645,10 @@
     let draftRawText = "";
     const storageKey = "la-cucharita-recipes-v1";
     const weeklyMenuStorageKey = "la-cucharita-weekly-menu-v1";
+    const adminSessionStorageKey = "la-cucharita-admin-session-v1";
+    const apiBaseUrl = typeof window.LA_CUCHARITA_API_BASE_URL === "string"
+      ? window.LA_CUCHARITA_API_BASE_URL.trim().replace(/\/+$/, "")
+      : "";
     const menuDays = [
       { id: "lunes", label: "Lunes" },
       { id: "martes", label: "Martes" },
@@ -676,7 +690,7 @@
             </div>
           </button>
           <button class="favorite" type="button" data-favorite="${recipe.id}" aria-label="${recipe.favorite ? "Quitar de" : "Añadir a"} favoritas" aria-pressed="${recipe.favorite}">♡</button>
-          <button class="delete-recipe" type="button" data-delete-recipe="${recipe.id}" aria-label="Eliminar receta: ${escapeHtml(recipe.title)}">×</button>
+          ${adminAuthenticated && publicCatalogLoaded ? `<button class="delete-recipe" type="button" data-delete-recipe="${recipe.id}" aria-label="Eliminar receta: ${escapeHtml(recipe.title)}">×</button>` : ""}
         </article>`).join("");
     }
 
@@ -704,27 +718,212 @@
         && (recipe.image === undefined || /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(recipe.image));
     }
 
-    function loadRecipes() {
-      recipes = recipes.map(recipe => ({
-        ...recipe,
-        shoppingList: recipe.shoppingList || recipe.ingredients.slice()
-      }));
+    function applyLocalFavorites(publicRecipes) {
       try {
         const saved = localStorage.getItem(storageKey);
-        if (saved === null) return;
+        if (saved === null) return publicRecipes;
         const storedRecipes = JSON.parse(saved);
         if (!Array.isArray(storedRecipes) || !storedRecipes.every(isValidRecipe)) {
           throw new Error("El contenido guardado no tiene el formato esperado.");
         }
-        recipes = storedRecipes.map(recipe => ({
+        const savedFavorites = new Map(storedRecipes.map(recipe => [recipe.id, {
+          title: recipe.title,
+          favorite: recipe.favorite
+        }]));
+        return publicRecipes.map(recipe => ({
+          ...recipe,
+          favorite: savedFavorites.get(recipe.id)?.title === recipe.title
+            ? savedFavorites.get(recipe.id).favorite
+            : recipe.favorite
+        }));
+      } catch (error) {
+        console.error("No se pudieron recuperar las recetas favoritas locales.", error);
+        return publicRecipes;
+      }
+    }
+
+    async function loadRecipes() {
+      try {
+        const response = await fetch(new URL("la-cucharita-recetas.json", document.baseURI), { cache: "no-store" });
+        if (!response.ok) throw new Error(`El servidor respondió con HTTP ${response.status}.`);
+        const publicRecipes = await response.json();
+        if (!Array.isArray(publicRecipes) || !publicRecipes.every(isValidRecipe)) {
+          throw new Error("El JSON público no tiene el formato esperado.");
+        }
+        sharedCatalogRecipes = publicRecipes.map(recipe => ({
           ...recipe,
           shoppingList: recipe.shoppingList || recipe.ingredients.slice()
         }));
-        nextId = Math.max(0, ...recipes.map(recipe => recipe.id)) + 1;
+        recipes = applyLocalFavorites(sharedCatalogRecipes).map(recipe => ({
+          ...recipe,
+          shoppingList: recipe.shoppingList || recipe.ingredients.slice()
+        }));
+        publicCatalogLoaded = true;
       } catch (error) {
-        console.error("No se pudieron cargar las recetas guardadas.", error);
-        showToast("No se pudieron cargar las recetas guardadas en este navegador.");
+        console.error("No se pudieron cargar las recetas públicas.", error);
+        try {
+          const saved = localStorage.getItem(storageKey);
+          if (saved !== null) {
+            const storedRecipes = JSON.parse(saved);
+            if (!Array.isArray(storedRecipes) || !storedRecipes.every(isValidRecipe)) {
+              throw new Error("El contenido guardado no tiene el formato esperado.");
+            }
+            recipes = storedRecipes.map(recipe => ({
+              ...recipe,
+              shoppingList: recipe.shoppingList || recipe.ingredients.slice()
+            }));
+          } else {
+            recipes = recipes.map(recipe => ({
+              ...recipe,
+              shoppingList: recipe.shoppingList || recipe.ingredients.slice()
+            }));
+          }
+        } catch (fallbackError) {
+          console.error("No se pudieron cargar las recetas guardadas como alternativa.", fallbackError);
+          recipes = [];
+          showToast("No se pudieron cargar las recetas públicas ni las guardadas en este navegador.");
+        }
+        if (document.location.protocol !== "file:") {
+          showToast("No se pudo leer el JSON público; se muestran los datos locales de respaldo.");
+        }
       }
+      nextId = Math.max(0, ...recipes.map(recipe => recipe.id)) + 1;
+    }
+
+    function updateAdminControls(message) {
+      const canManageRecipes = adminAuthenticated && publicCatalogLoaded;
+      document.querySelectorAll("[data-open-add]").forEach(button => { button.hidden = !canManageRecipes; });
+      document.getElementById("admin-login").hidden = !apiBaseUrl || adminAuthenticated;
+      document.getElementById("admin-logout").hidden = !adminAuthenticated;
+      document.getElementById("import-recipes").hidden = !canManageRecipes;
+      document.getElementById("admin-status").textContent = message || (canManageRecipes
+        ? "Sesión de administradora activa"
+        : adminAuthenticated && !publicCatalogLoaded
+          ? "No se puede publicar: el catálogo público no se ha cargado"
+        : !apiBaseUrl
+          ? "Publicación compartida pendiente de configurar"
+          : "Solo la administradora puede publicar recetas");
+    }
+
+    async function initializeAdminSession() {
+      if (!apiBaseUrl) {
+        updateAdminControls();
+        return;
+      }
+
+      const hashParams = new URLSearchParams(window.location.hash.slice(1));
+      const callbackToken = hashParams.get("la-cucharita-session");
+      if (callbackToken) {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        try {
+          sessionStorage.setItem(adminSessionStorageKey, callbackToken);
+        } catch (error) {
+          console.error("No se pudo guardar la sesión de administración en esta pestaña.", error);
+          updateAdminControls("No se pudo guardar la sesión; vuelve a iniciar sesión.");
+          return;
+        }
+      }
+
+      try {
+        adminSessionToken = sessionStorage.getItem(adminSessionStorageKey) || "";
+        if (!adminSessionToken) {
+          updateAdminControls();
+          return;
+        }
+        const response = await fetch(`${apiBaseUrl}/api/session`, {
+          headers: { Authorization: `Bearer ${adminSessionToken}` }
+        });
+        if (!response.ok) {
+          sessionStorage.removeItem(adminSessionStorageKey);
+          adminSessionToken = "";
+          updateAdminControls(response.status === 401
+            ? "La sesión ha caducado. Inicia sesión de nuevo."
+            : "No se pudo verificar la sesión de administración.");
+          return;
+        }
+        const session = await response.json();
+        adminAuthenticated = session.authenticated === true;
+        if (!adminAuthenticated) {
+          sessionStorage.removeItem(adminSessionStorageKey);
+          adminSessionToken = "";
+        }
+        updateAdminControls();
+      } catch (error) {
+        console.error("No se pudo verificar la sesión de administración.", error);
+        adminAuthenticated = false;
+        adminSessionToken = "";
+        updateAdminControls("No se pudo conectar con el servicio de publicación.");
+      }
+    }
+
+    async function adminApiRequest(path, options = {}) {
+      if (!apiBaseUrl || !adminAuthenticated || !adminSessionToken || !publicCatalogLoaded) {
+        throw new Error("Inicia sesión como administradora para publicar cambios.");
+      }
+      let response;
+      try {
+        response = await fetch(`${apiBaseUrl}${path}`, {
+          ...options,
+          headers: {
+            Authorization: `Bearer ${adminSessionToken}`,
+            ...(options.body ? { "Content-Type": "application/json" } : {}),
+            ...options.headers
+          }
+        });
+      } catch (error) {
+        throw new Error("No se pudo conectar con el servicio de publicación.", { cause: error });
+      }
+      let result;
+      try {
+        result = await response.json();
+      } catch (error) {
+        throw new Error("El servicio de publicación devolvió una respuesta no válida.", { cause: error });
+      }
+      if (!response.ok) {
+        if (response.status === 401) {
+          adminAuthenticated = false;
+          adminSessionToken = "";
+          sessionStorage.removeItem(adminSessionStorageKey);
+          updateAdminControls("La sesión ha caducado. Inicia sesión de nuevo.");
+          document.getElementById("detail-overlay").classList.remove("open");
+          renderRecipes();
+        }
+        throw new Error(result.error || "No se pudo guardar el catálogo compartido.");
+      }
+      return result;
+    }
+
+    function acceptSharedCatalog(result) {
+      if (!Array.isArray(result.recipes) || !result.recipes.every(isValidRecipe)) {
+        throw new Error("El servicio devolvió un catálogo con un formato no válido.");
+      }
+      sharedCatalogRecipes = result.recipes.map(recipe => ({
+        ...recipe,
+        shoppingList: recipe.shoppingList || recipe.ingredients.slice()
+      }));
+      recipes = applyLocalFavorites(sharedCatalogRecipes).map(recipe => ({
+        ...recipe,
+        shoppingList: recipe.shoppingList || recipe.ingredients.slice()
+      }));
+      publicCatalogLoaded = true;
+      nextId = Math.max(0, ...recipes.map(recipe => recipe.id)) + 1;
+      saveRecipes();
+      renderRecipes();
+      renderWeeklyMenu();
+    }
+
+    async function saveSharedCatalog() {
+      const sharedFavorites = new Map(sharedCatalogRecipes.map(recipe => [recipe.id, recipe.favorite]));
+      const result = await adminApiRequest("/api/recipes", {
+        method: "PUT",
+        body: JSON.stringify({
+          recipes: recipes.map(recipe => ({
+            ...recipe,
+            favorite: sharedFavorites.has(recipe.id) ? sharedFavorites.get(recipe.id) : recipe.favorite
+          }))
+        })
+      });
+      acceptSharedCatalog(result);
     }
 
     function saveRecipes() {
@@ -810,16 +1009,17 @@
       }
     }
 
-    function deleteRecipe(id) {
+    async function deleteRecipe(id) {
       const recipe = recipes.find(item => item.id === id);
       if (!recipe || !window.confirm(`¿Quieres eliminar «${recipe.title}»? Esta acción no se puede deshacer.`)) return;
 
-      const previousRecipes = recipes;
       const previousMenus = JSON.stringify(weeklyMenus);
-      recipes = recipes.filter(item => item.id !== id);
-      if (!saveRecipes()) {
-        recipes = previousRecipes;
-        renderRecipes();
+      try {
+        const result = await adminApiRequest(`/api/recipes/${id}`, { method: "DELETE" });
+        acceptSharedCatalog(result);
+      } catch (error) {
+        console.error("No se pudo eliminar la receta compartida.", error);
+        showToast(error.message);
         return;
       }
 
@@ -934,24 +1134,17 @@
         if (ids.size !== importedRecipes.length) {
           throw new Error("El archivo contiene recetas con identificadores repetidos.");
         }
-        if (!window.confirm("La importación reemplazará todas las recetas de este navegador. ¿Quieres continuar?")) return;
+        if (!window.confirm("La importación reemplazará todas las recetas compartidas. ¿Quieres continuar?")) return;
 
         const normalizedRecipes = importedRecipes.map(recipe => ({
           ...recipe,
           shoppingList: recipe.shoppingList || recipe.ingredients.slice()
         }));
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(normalizedRecipes));
-        } catch (error) {
-          console.error("No se pudieron guardar las recetas importadas.", error);
-          showToast("No se pudieron importar las recetas en este navegador.");
-          return;
-        }
-
-        recipes = normalizedRecipes;
-        nextId = Math.max(0, ...recipes.map(recipe => recipe.id)) + 1;
-        renderRecipes();
-        renderWeeklyMenu();
+        const result = await adminApiRequest("/api/recipes", {
+          method: "PUT",
+          body: JSON.stringify({ recipes: normalizedRecipes })
+        });
+        acceptSharedCatalog(result);
         showToast(`Se importaron ${recipes.length} ${recipes.length === 1 ? "receta" : "recetas"}.`);
       } catch (error) {
         console.error("No se pudieron importar las recetas.", error);
@@ -1132,15 +1325,15 @@
     }
     
 
-    function saveDraft() {
+    async function saveDraft() {
       const recipe = formatCurrentDraft();
       if (!recipe.title) {
         document.getElementById("draft-title").focus();
         showToast("Ponle un nombre para poder guardarla.");
         return;
       }
-      recipes.unshift({
-        id: nextId++,
+      const newRecipe = {
+        id: nextId,
         title: recipe.title,
         category: recipe.category,
         time: recipe.time,
@@ -1150,12 +1343,26 @@
         ingredients: recipe.ingredients,
         steps: recipe.steps,
         shoppingList: recipe.shoppingList,
-        sourceUrl: draftSourceUrl,
+        ...(draftSourceUrl ? { sourceUrl: draftSourceUrl } : {}),
         ...(draftPhotoData ? { image: draftPhotoData } : {}),
         favorite: false,
         quick: recipe.quick
-      });
-      const saved = saveRecipes();
+      };
+      const saveButton = document.getElementById("save-button");
+      saveButton.disabled = true;
+      try {
+        const result = await adminApiRequest("/api/recipes", {
+          method: "POST",
+          body: JSON.stringify({ recipe: newRecipe })
+        });
+        acceptSharedCatalog(result);
+      } catch (error) {
+        console.error("No se pudo publicar la receta.", error);
+        showToast(error.message);
+        return;
+      } finally {
+        saveButton.disabled = false;
+      }
       categoryFilter.value = "Todas";
       quickFilter = "Todas";
       document.querySelectorAll(".chip").forEach(chip => chip.setAttribute("aria-pressed", String(chip.dataset.filter === "Todas")));
@@ -1163,7 +1370,7 @@
       renderRecipes();
       renderWeeklyMenu();
       closeDialog(addOverlay);
-      if (saved) showToast("¡Receta añadida y guardada en este navegador!");
+      showToast("¡Receta publicada en el recetario compartido!");
     }
 
     function showRecipe(id) {
@@ -1181,12 +1388,12 @@
           <h3>Elaboración</h3>
           ${recipe.steps.length ? `<ol>${recipe.steps.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : "<p>Aún no has añadido los pasos.</p>"}
           ${recipe.sourceUrl ? `<h3>Receta original</h3><p><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(new URL(recipe.sourceUrl).hostname)}</a></p>` : ""}
-          <div class="photo-actions">
+          ${adminAuthenticated && publicCatalogLoaded ? `<div class="photo-actions">
             <label class="photo-action"> ${recipe.image ? "Cambiar foto" : "Añadir foto"}
               <input type="file" accept="image/*" data-recipe-photo="${recipe.id}" aria-label="${recipe.image ? "Cambiar" : "Añadir"} foto de ${escapeHtml(recipe.title)}">
             </label>
             ${recipe.image ? '<button class="remove-photo" type="button" data-remove-photo>Quitar foto</button>' : ""}
-          </div>
+          </div>` : ""}
           <div class="dialog-actions"><button class="cancel-button" type="button" data-close-detail>Cerrar</button></div>
         </div>`;
       document.getElementById("detail-overlay").classList.add("open");
@@ -1207,6 +1414,18 @@
       document.getElementById(id).addEventListener("input", updateDraftFormatPreview);
     });
     document.getElementById("export-recipes").addEventListener("click", exportRecipes);
+    document.getElementById("admin-login").addEventListener("click", () => {
+      if (apiBaseUrl) window.location.assign(`${apiBaseUrl}/auth/login`);
+    });
+    document.getElementById("admin-logout").addEventListener("click", () => {
+      sessionStorage.removeItem(adminSessionStorageKey);
+      adminSessionToken = "";
+      adminAuthenticated = false;
+      updateAdminControls();
+      document.getElementById("detail-overlay").classList.remove("open");
+      renderRecipes();
+      showToast("Se ha cerrado la sesión de administración.");
+    });
     const importFileInput = document.getElementById("import-recipes-file");
     document.getElementById("import-recipes").addEventListener("click", () => importFileInput.click());
     importFileInput.addEventListener("change", async event => {
@@ -1226,11 +1445,22 @@
       }
       if (event.target.closest("[data-remove-photo]")) {
         const photoInput = document.querySelector("#detail-dialog [data-recipe-photo]");
+        if (!photoInput) return;
         const recipe = recipes.find(item => item.id === Number(photoInput.dataset.recipePhoto));
+        if (!recipe) return;
+        const previousImage = recipe.image;
         delete recipe.image;
-        const saved = saveRecipes();
-        showRecipe(recipe.id);
-        if (saved) showToast(`Se quitó la foto de «${recipe.title}».`);
+        saveSharedCatalog()
+          .then(() => {
+            showRecipe(recipe.id);
+            showToast(`Se quitó la foto de «${recipe.title}».`);
+          })
+          .catch(error => {
+            recipe.image = previousImage;
+            console.error("No se pudo quitar la foto compartida.", error);
+            showRecipe(recipe.id);
+            showToast(error.message);
+          });
       }
     });
     document.getElementById("draft-photo").addEventListener("change", async event => {
@@ -1250,12 +1480,16 @@
       const input = event.target.closest("[data-recipe-photo]");
       if (!input || !input.files[0]) return;
       const recipe = recipes.find(item => item.id === Number(input.dataset.recipePhoto));
+      if (!recipe) return;
+      const previousImage = recipe.image;
       try {
         recipe.image = await readPhoto(input.files[0]);
-        const saved = saveRecipes();
+        await saveSharedCatalog();
         showRecipe(recipe.id);
-        if (saved) showToast(`Foto guardada para «${recipe.title}».`);
+        showToast(`Foto publicada para «${recipe.title}».`);
       } catch (error) {
+        if (previousImage === undefined) delete recipe.image;
+        else recipe.image = previousImage;
         console.error("No se pudo procesar la foto de la receta.", error);
         input.value = "";
         showToast(error.message);
@@ -1277,6 +1511,7 @@
       const favoriteButton = event.target.closest("[data-favorite]");
       if (favoriteButton) {
         const recipe = recipes.find(item => item.id === Number(favoriteButton.dataset.favorite));
+        if (!recipe) return;
         recipe.favorite = !recipe.favorite;
         saveRecipes();
         renderRecipes();
@@ -1345,16 +1580,21 @@
       recordingButton.textContent = "■ Parar dictado";
     });
 
-    loadRecipes();
-    menuWeekInput.value = currentIsoWeek();
-    loadWeeklyMenus();
     document.addEventListener("keydown", event => {
       if (event.key === "Escape") {
         document.querySelectorAll(".overlay.open").forEach(closeDialog);
       }
     });
-    renderRecipes();
-    renderWeeklyMenu();
+    async function initializeApp() {
+      await loadRecipes();
+      await initializeAdminSession();
+      updateAdminControls();
+      menuWeekInput.value = currentIsoWeek();
+      loadWeeklyMenus();
+      renderRecipes();
+      renderWeeklyMenu();
+    }
+    initializeApp();
   </script>
 </body>
 </html>

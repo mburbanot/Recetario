@@ -1,0 +1,15 @@
+name = "la-cucharita-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[vars]
+SITE_ORIGIN = "https://mburbanot.github.io"
+SITE_URL = "https://mburbanot.github.io/Recetario/"
+ADMIN_GITHUB_LOGIN = "mburbanot"
+GITHUB_OWNER = "mburbanot"
+GITHUB_REPOSITORY = "Recetario"
+GITHUB_BRANCH = "main"
+RECIPES_FILE_PATH = "la-cucharita-recetas.json"
+GITHUB_OAUTH_CLIENT_ID = "0539ac279c6f4b37f4059ebfece2878f62460497"
+GITHUB_OAUTH_CALLBACK_URL = "https://la-cucharita-api.mynurgia.workers.dev/auth/callback"

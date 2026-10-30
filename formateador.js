@@ -86,19 +86,25 @@ const REGLAS = [
       }
 
       const hasSectionHeadings = lines.some(line => sectionPattern.test(line));
-      const statements = unsectioned.flatMap(line => line.split(/(?<=[.!?])\s+/)).filter(Boolean);
-      const title = (hasSectionHeadings ? unsectioned.shift() : statements.shift()) || "";
-      const cleanTitle = title
+      let statements = unsectioned.flatMap(line => line.split(/(?<=[.!?])\s+/)).filter(Boolean);
+      const titleCandidate = (hasSectionHeadings ? unsectioned[0] : statements[0]) || "";
+      const cleanTitle = titleCandidate
         .replace(/^(?:receta(?:\s+de)?|hoy\s+(?:vamos\s+a\s+)?(?:preparar|hacer))\s*:?\s*/i, "")
         .replace(/^#\s*/, "")
         .replace(/[.!?]+$/, "")
         .trim();
+      const possibleAction = cleanTitle.replace(CONECTORES, "");
+      const startsWithAction = new RegExp(`^(?:se\\s+)?(?:${listaVerbos})\\b`, "i").test(possibleAction);
+      if (!startsWithAction) {
+        if (hasSectionHeadings) unsectioned.shift();
+        else statements.shift();
+      }
       const toItems = values => values.join("\n")
         .split(/\r?\n|[;,]|\s+y\s+(?=(?:\d|un\b|una\b|unos\b|unas\b|medio\b|media\b|una pizca\b|un puñado\b))/i)
         .map(item => item.replace(/^[\s•*-]+/, "").trim().replace(/[.!?]+$/, ""))
         .filter(Boolean);
 
-      if (!r.title && cleanTitle) r.title = cleanTitle;
+      if (!r.title && cleanTitle && !startsWithAction) r.title = cleanTitle;
       if (categoryMatch) r.category = categoryMatch[1].toLocaleLowerCase("es");
       if (!r.time && timeMatch) r.time = timeMatch[1];
       if (!r.ingredients.length) {
@@ -186,6 +192,50 @@ const REGLAS = [
     }
   },
   {
+    id: "pasos-explicativos",
+    nombre: "Redacta instrucciones claras y conectadas",
+    activa: true,
+    aplicar(r) {
+      const cleanIngredient = value => value
+        .replace(/^\d+[\d.,/]*\s*(?:g|kg|ml|l|uds?|cucharadas?|cucharaditas?|vasos?|tazas?)?\s*(?:de\s+)?/i, "")
+        .replace(/[.!?]+$/, "")
+        .trim();
+
+      r.steps = r.steps
+        .map(step => step.trim())
+        .filter(step => !/^(?:tras eso|después|despues|luego|a continuación|a continuacion|por último|por ultimo|finalmente|y)[,.]?\s*\.?$/i.test(step))
+        .map(step => {
+          let text = step;
+          let match = text.match(/^Mezcla con (.+)\.$/i);
+          if (match) {
+            text = `Mezcla la preparación con ${cleanIngredient(match[1])} para integrar los sabores.`;
+          } else if ((match = text.match(/^Añade (.+)\.$/i))) {
+            text = `Incorpora ${cleanIngredient(match[1])} a la mezcla.`;
+          } else if ((match = text.match(/^Lleva a la (airfryer|freidora de aire|horno) (.+)\.$/i))) {
+            const appliance = match[1].toLocaleLowerCase("es") === "horno" ? "horno" : "airfryer";
+            text = `Cocina la preparación en la ${appliance} durante ${match[2]}.`;
+          } else if ((match = text.match(/^Deja (?:otros?\s+)?(.+?)\s+(?:a|en) la (airfryer|freidora de aire)\.$/i))) {
+            text = `Cocina la preparación durante ${match[1]} más en la airfryer.`;
+          }
+          return text;
+        });
+
+      if (r.steps.length > 1) {
+        r.steps = r.steps.map((step, index) => {
+          if (index === 0 || /^(?:después|despues|luego|a continuación|a continuacion|por último|por ultimo|para terminar|finalmente)\b/i.test(step)) {
+            return step;
+          }
+          const transition = index === r.steps.length - 1
+            ? "Para terminar"
+            : index % 2 === 0 ? "Después" : "A continuación";
+          return `${transition}, ${step.charAt(0).toLocaleLowerCase("es")}${step.slice(1)}`;
+        });
+      }
+
+      if (r.steps.length) return "Instrucciones explicadas y enlazadas";
+    }
+  },
+  {
     id: "ingredientes-desde-pasos",
     nombre: "Detecta ingredientes conocidos si no hay lista",
     activa: true,
@@ -249,9 +299,51 @@ const REGLAS = [
     activa: true,
     aplicar(r) {
       if (r.title || !r.ingredients.length) return;
-      const [a, b, c] = r.ingredients.map(i => i.toLocaleLowerCase("es"));
-      r.title = mayus(b ? `${a} con ${b}${c ? ` y ${c}` : ""}` : a).slice(0, 70);
+      const ingredients = r.ingredients.map(i => i
+        .replace(/^\d+[\d.,/]*\s*(?:g|kg|ml|l|uds?|cucharadas?|cucharaditas?|vasos?|tazas?)?\s*(?:de\s+)?/i, "")
+        .trim()
+        .toLocaleLowerCase("es"))
+        .filter(Boolean);
+      const [a, b, c] = ingredients;
+      if (!a) return;
+      const mainWord = value => value.split(/\s+/).filter(word => !["de", "del", "la", "el", "los", "las"].includes(word)).pop();
+      const firstIngredient = a.split(/\s+/)[0];
+      const secondIngredient = b ? mainWord(b) : "";
+      const thirdIngredient = c ? mainWord(c) : "";
+      const context = `${r.texto} ${r.steps.join(" ")}`.toLocaleLowerCase("es");
+      const prefix = /airfryer|freidora de aire/.test(context)
+        ? "Bocados crujientes de"
+        : /horno|hornea/.test(context)
+          ? "Horneado de"
+          : r.category === "Postre" || /bizcocho|tarta|galleta|helado|flan|az[uú]car|chocolate/.test(context)
+            ? "Dulce de"
+            : "";
+      if (prefix === "Bocados crujientes de") {
+        r.title = `${prefix} ${firstIngredient}${secondIngredient ? ` y ${secondIngredient}` : ""}`;
+      } else if (prefix) {
+        r.title = `${prefix} ${firstIngredient}${secondIngredient ? ` con ${secondIngredient}` : ""}`;
+      } else {
+        r.title = `${firstIngredient}${secondIngredient ? ` con ${secondIngredient}` : ""}${thirdIngredient ? ` y ${thirdIngredient}` : ""}`;
+      }
       return `Título propuesto: «${r.title}»`;
+    }
+  },
+  {
+    id: "titulo-breve",
+    nombre: "Limita el título a seis palabras",
+    activa: true,
+    aplicar(r) {
+      const words = r.title.trim().split(/\s+/).filter(Boolean);
+      if (words.length <= 6) {
+        r.title = mayus(r.title.trim());
+        return;
+      }
+      const shortTitle = words.slice(0, 6);
+      while (/\b(?:con|de|y|en|a|del|la|el|los|las|para|por|un|una|unos|unas)$/i.test(shortTitle[shortTitle.length - 1] || "")) {
+        shortTitle.pop();
+      }
+      r.title = mayus(shortTitle.join(" ").trim());
+      return "Título ajustado a un máximo de seis palabras";
     }
   },
   {
